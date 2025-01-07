@@ -180,9 +180,10 @@ in {
       };
 
       startServices = mkOption {
-        type = with types; either bool (enum [ "suggest" "sd-switch" ]);
-        apply = p: if isBool p then p else p == "sd-switch";
-        default = true;
+        default = "suggest";
+        type = with types;
+          either bool (enum [ "suggest" "legacy" "sd-switch" ]);
+        apply = p: if isBool p then if p then "sd-switch" else "suggest" else p;
         description = ''
           Whether new or changed services that are wanted by active targets
           should be started. Additionally, stop obsolete services from the
@@ -194,6 +195,12 @@ in {
           : Use a very simple shell script to print suggested
             {command}`systemctl` commands to run. You will have to
             manually run those commands after the switch.
+
+          `legacy`
+          : Use a Ruby script to, in a more robust fashion, determine the
+            necessary changes and automatically run the
+            {command}`systemctl` commands. Note, this alternative will soon
+            be removed.
 
           `sd-switch` (or `true`)
           : Use sd-switch, a tool that determines the necessary changes and
@@ -290,6 +297,12 @@ in {
       message = "This module is only available on Linux.";
     }];
 
+    warnings = lib.optional (cfg.startServices == "legacy") ''
+      Having 'systemd.user.startServices = "legacy"' is deprecated and will soon be removed.
+
+      Please change to 'systemd.user.startServices = true' to use the new systemd unit switcher (sd-switch).
+    '';
+
     xdg.configFile = mkMerge [
       (lib.listToAttrs ((buildServices "service" cfg.services)
         ++ (buildServices "slice" cfg.slices)
@@ -310,23 +323,26 @@ in {
     # set and systemd commands will fail. We'll therefore have to
     # set it ourselves in that case.
     home.activation.reloadSystemd = hm.dag.entryAfter [ "linkGeneration" ] (let
-      suggestCmd = ''
-        bash ${./systemd-activate.sh} "''${oldGenPath=}" "$newGenPath"
-      '';
-
-      sdSwitchCmd = let
-        timeoutArg = if cfg.servicesStartTimeoutMs != 0 then
-          "--timeout " + servicesStartTimeoutMs
-        else
-          "";
-      in ''
-        ${lib.getExe pkgs.sd-switch} \
-          ''${DRY_RUN:+--dry-run} $VERBOSE_ARG ${timeoutArg} \
-          ''${oldUnitsDir:+--old-units $oldUnitsDir} \
-          --new-units "$newUnitsDir"
-      '';
-
-      systemdCmd = if cfg.startServices then sdSwitchCmd else suggestCmd;
+      cmd = {
+        suggest = ''
+          bash ${./systemd-activate.sh} "''${oldGenPath=}" "$newGenPath"
+        '';
+        legacy = ''
+          ${pkgs.ruby}/bin/ruby ${./systemd-activate.rb} \
+            "''${oldGenPath=}" "$newGenPath" "${servicesStartTimeoutMs}"
+        '';
+        sd-switch = let
+          timeoutArg = if cfg.servicesStartTimeoutMs != 0 then
+            "--timeout " + servicesStartTimeoutMs
+          else
+            "";
+        in ''
+          ${lib.getExe pkgs.sd-switch} \
+            ''${DRY_RUN:+--dry-run} $VERBOSE_ARG ${timeoutArg} \
+            ''${oldUnitsDir:+--old-units $oldUnitsDir} \
+            --new-units "$newUnitsDir"
+        '';
+      };
 
       # Make sure that we have an environment where we are likely to
       # successfully talk with systemd.
@@ -358,7 +374,7 @@ in {
           newUnitsDir=${pkgs.emptyDirectory}
         fi
 
-        ${ensureSystemd} ${systemdCmd}
+        ${ensureSystemd} ${getAttr cfg.startServices cmd}
 
         unset newUnitsDir oldUnitsDir
       else
