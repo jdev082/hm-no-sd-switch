@@ -1,3 +1,7 @@
+Why no `sd-switch`?
+===================
+Recently, `sd-switch` has been made the default in home-manager master. This change resulted in my home-manager configuration failing to build. Due to it being trivial to revert this change, I am maintaining this soft-fork. 
+
 Home Manager using Nix
 ======================
 
