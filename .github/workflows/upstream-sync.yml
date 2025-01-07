@@ -17,4 +17,4 @@ jobs:
           base: master
           head: master
           repo: hm-no-sd-switch
-          pr-title: Sync
+          pr_title: Sync
