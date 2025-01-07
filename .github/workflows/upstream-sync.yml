@@ -18,3 +18,4 @@ jobs:
           head: master
           repo: hm-no-sd-switch
           pr_title: Sync
+          auto_merge: true
